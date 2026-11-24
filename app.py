@@ -28,7 +28,7 @@ game_html = """
     justify-content: space-between;
     width: 300px;
     margin-bottom: 10px;
-    font-size: 18px;
+    font-size: 16px;
     font-weight: bold;
   }
   .timer { color: #00ffcc; }
@@ -62,7 +62,7 @@ game_html = """
 <body>
 
 <div class="header">
-  <div>⏱️ 시간: <span id="timer" class="timer">0.00</span>초</div>
+  <div>⏱️ <span id="timer" class="timer">0.00</span>초</div>
   <div>🏆 최고: <span id="best" class="best">-</span></div>
 </div>
 
@@ -81,7 +81,7 @@ const ctx = canvas.getContext('2d');
 const COLS = 10;
 const ROWS = 20;
 const BLOCK_SIZE = 30;
-const GOAL_ROW = 5; // 위에서 5번째 줄 (바닥에서 15칸 높이)에 도달하면 승리
+const GOAL_ROW = 5; // 바닥에서 15칸 높이
 
 const COLORS = [
   null,
@@ -96,25 +96,28 @@ const COLORS = [
 
 const SHAPES = [
   [],
-  [[0,1,0],[1,1,1],[0,0,0]], // T
-  [[0,2,0,0],[0,2,0,0],[0,2,0,0],[0,2,0,0]], // I
-  [[0,3,3],[3,3,0],[0,0,0]], // S
-  [[4,4,0],[0,4,4],[0,0,0]], // Z
-  [[0,0,5],[5,5,5],[0,0,0]], // L
-  [[6,6],[6,6]],             // O
-  [[7,0,0],[7,7,7],[0,0,0]]  // J
+  [[0, 1, 0], [1, 1, 1], [0, 0, 0]], // T
+  [[0, 2, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]], // I
+  [[0, 3, 3], [3, 3, 0], [0, 0, 0]], // S
+  [[4, 4, 0], [0, 4, 4], [0, 0, 0]], // Z
+  [[0, 0, 5], [5, 5, 5], [0, 0, 0]], // L
+  [[6, 6], [6, 6]], // O
+  [[7, 0, 0], [7, 7, 7], [0, 0, 0]]  // J
 ];
 
 let board = [];
 let player = { pos: {x: 0, y: 0}, matrix: null };
 let dropCounter = 0;
-let dropInterval = 600; // 기본 낙하 속도 (ms)
+let dropInterval = 600;
 let lastTime = 0;
 let startTime = 0;
 let elapsedTime = 0;
-let isGameOver = false;
 let isWin = false;
 let bestTime = localStorage.getItem('stacker_best') || null;
+
+// 결과 보상 변수
+let earnedStars = "";
+let earnedPoints = 0;
 
 if (bestTime) {
   document.getElementById('best').innerText = parseFloat(bestTime).toFixed(2) + '초';
@@ -122,6 +125,21 @@ if (bestTime) {
 
 function createBoard() {
   return Array.from({length: ROWS}, () => Array(COLS).fill(0));
+}
+
+function calculateReward(time) {
+  // 시간에 따른 별 개수 및 포인트 계산
+  if (time < 10.0) {
+    earnedStars = "⭐⭐⭐";
+    // 10초 미만일 때 남은 시간만큼 추가 보너스
+    earnedPoints = 1000 + Math.floor((10.0 - time) * 100);
+  } else if (time < 15.0) {
+    earnedStars = "⭐⭐☆";
+    earnedPoints = 600 + Math.floor((15.0 - time) * 50);
+  } else {
+    earnedStars = "⭐☆☆";
+    earnedPoints = Math.max(100, 300 - Math.floor((time - 15.0) * 10));
+  }
 }
 
 function drawMatrix(matrix, offset) {
@@ -142,7 +160,7 @@ function drawGoalLine() {
   const y = GOAL_ROW * BLOCK_SIZE;
   ctx.save();
   ctx.beginPath();
-  ctx.setLineDash([8, 6]);
+  ctx.setLineDash([6, 4]);
   ctx.moveTo(0, y);
   ctx.lineTo(canvas.width, y);
   ctx.strokeStyle = '#ff4b4b';
@@ -175,15 +193,41 @@ function draw() {
   drawGoalLine();
 
   if (isWin) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    // 어두운 결과창 배경
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#00ffcc';
-    ctx.font = 'bold 28px Malgun Gothic';
+
+    // 결과 박스 테두리
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(25, canvas.height / 2 - 115, canvas.width - 50, 230);
+
     ctx.textAlign = 'center';
-    ctx.fillText('🎉 목표 도달 성공!', canvas.width / 2, canvas.height / 2 - 20);
+
+    // 1. 타이틀
+    ctx.fillStyle = '#00ffcc';
+    ctx.font = 'bold 24px Malgun Gothic';
+    ctx.fillText('🎉 목표 도달 성공!', canvas.width / 2, canvas.height / 2 - 70);
+
+    // 2. 별 개수 표시
+    ctx.font = '34px Malgun Gothic';
+    ctx.fillText(earnedStars, canvas.width / 2, canvas.height / 2 - 20);
+
+    // 3. 클리어 시간
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 20px Malgun Gothic';
-    ctx.fillText(`기록: ${elapsedTime.toFixed(2)}초`, canvas.width / 2, canvas.height / 2 + 20);
+    ctx.font = 'bold 18px Malgun Gothic';
+    ctx.fillText(`⏱️ 기록: ${elapsedTime.toFixed(2)}초`, canvas.width / 2, canvas.height / 2 + 25);
+
+    // 4. 획득 포인트
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 22px Malgun Gothic';
+    ctx.fillText(`💰 +${earnedPoints.toLocaleString()} P`, canvas.width / 2, canvas.height / 2 + 65);
+
+    // 안내 문구
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '13px Malgun Gothic';
+    ctx.fillText('R 키를 눌러 다시 도전하세요', canvas.width / 2, canvas.height / 2 + 98);
+
     ctx.textAlign = 'left';
   }
 }
@@ -213,7 +257,6 @@ function merge(board, player) {
 }
 
 function checkWin() {
-  // GOAL_ROW 또는 그 위쪽에 블록이 하나라도 고정되면 승리
   for (let r = 0; r <= GOAL_ROW; r++) {
     for (let c = 0; c < COLS; c++) {
       if (board[r][c] !== 0) {
@@ -224,18 +267,23 @@ function checkWin() {
   return false;
 }
 
+function handleWin() {
+  isWin = true;
+  calculateReward(elapsedTime);
+  if (!bestTime || elapsedTime < parseFloat(bestTime)) {
+    bestTime = elapsedTime.toFixed(2);
+    localStorage.setItem('stacker_best', bestTime);
+    document.getElementById('best').innerText = bestTime + '초';
+  }
+}
+
 function playerDrop() {
   player.pos.y++;
   if (collide(board, player)) {
     player.pos.y--;
     merge(board, player);
     if (checkWin()) {
-      isWin = true;
-      if (!bestTime || elapsedTime < parseFloat(bestTime)) {
-        bestTime = elapsedTime.toFixed(2);
-        localStorage.setItem('stacker_best', bestTime);
-        document.getElementById('best').innerText = bestTime + '초';
-      }
+      handleWin();
       return;
     }
     playerReset();
@@ -250,12 +298,7 @@ function playerHardDrop() {
   player.pos.y--;
   merge(board, player);
   if (checkWin()) {
-    isWin = true;
-    if (!bestTime || elapsedTime < parseFloat(bestTime)) {
-      bestTime = elapsedTime.toFixed(2);
-      localStorage.setItem('stacker_best', bestTime);
-      document.getElementById('best').innerText = bestTime + '초';
-    }
+    handleWin();
     return;
   }
   playerReset();
@@ -352,4 +395,3 @@ update();
 """
 
 components.html(game_html, height=740)
-
