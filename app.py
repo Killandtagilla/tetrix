@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="테트리스 클라이머", page_icon="🧱", layout="centered")
 st.title("🧱 테트리스 클라이머")
-st.markdown("고정된 **붉은 장애물**을 피해 블록을 쌓아 **목표 라인(노란 점선)**까지 최대한 빠르게 올라가세요!")
+st.markdown("**붉은 장애물**에 닿으면 즉시 아웃됩니다! 장애물을 피해 **목표 라인(노란 점선)**까지 최대한 빠르게 올라가세요!")
 
 game_html = """<!DOCTYPE html><html><head><style>
 body{margin:0;display:flex;flex-direction:column;align-items:center;background:#0e1117;color:#fff;font-family:sans-serif;user-select:none}
@@ -37,7 +37,7 @@ const DEFS=[
   {c:"#2979FF",r:["100","111","000"]},{c:"#FF9100",r:["001","111","000"]},{c:"#00E676",r:["011","110","000"]},{c:"#FF1744",r:["110","011","000"]}
 ];
 const SHAPES=DEFS.map(d=>({c:d.c,m:d.r.map(s=>s.split("").map(Number))}));
-let brd=[],cur=null,nxt=null,stT=0,elT=0,dCnt=0,lT=0,state="PLAY",aid=null;
+let brd=[],cur=null,nxt=null,stT=0,elT=0,dCnt=0,lT=0,state="PLAY",overMsg="",aid=null;
 
 function mkBrd(){
   let b=Array.from({length:ROWS},()=>Array(COLS).fill(0));
@@ -49,7 +49,7 @@ function rndP(){
   return{m:s.m.map(r=>[...r]),c:s.c,x:Math.floor(COLS/2)-Math.ceil(s.m.length/2),y:0};
 }
 function init(){
-  brd=mkBrd();nxt=rndP();spawn();stT=performance.now();lT=stT;dCnt=0;state="PLAY";
+  brd=mkBrd();nxt=rndP();spawn();stT=performance.now();lT=stT;dCnt=0;state="PLAY";overMsg="";
   reBtn.style.display="none";htEl.innerText="0";c.focus();
   if(aid)cancelAnimationFrame(aid);aid=requestAnimationFrame(loop);
 }
@@ -58,12 +58,17 @@ function spawn(){
   nctx.clearRect(0,0,80,60);
   let m=nxt.m,sz=14,sx=(80-m.length*sz)/2,sy=(60-m.length*sz)/2;
   m.forEach((row,r)=>row.forEach((v,col)=>{if(v){nctx.fillStyle=nxt.c;nctx.fillRect(sx+col*sz,sy+r*sz,sz-1,sz-1);}}));
-  if(col(brd,cur))end("OVER");
+  let res=col(brd,cur);
+  if(res)end("OVER",res==="OBS"?"장애물에 부딪혔습니다!":"블록이 천장에 닿았습니다.");
 }
 function col(b,p){
   for(let r=0;r<p.m.length;r++)for(let cl=0;cl<p.m[r].length;cl++)
-    if(p.m[r][cl]){let ny=p.y+r,nx=p.x+cl;if(nx<0||nx>=COLS||ny>=ROWS||(ny>=0&&b[ny][nx]!==0))return true;}
-  return false;
+    if(p.m[r][cl]){
+      let ny=p.y+r,nx=p.x+cl;
+      if(nx<0||nx>=COLS||ny>=ROWS)return "WALL";
+      if(ny>=0&&b[ny][nx]!==0)return b[ny][nx]==="OBS"?"OBS":"BLOCK";
+    }
+  return null;
 }
 function merge(b,p){
   let hi=ROWS;
@@ -73,23 +78,39 @@ function merge(b,p){
   htEl.innerText=Math.min(16,mx);
   if(hi<=GOAL)end("CLEAR");
 }
-function mv(d){if(state==="PLAY"){cur.x+=d;if(col(brd,cur))cur.x-=d;}}
+function mv(d){
+  if(state!=="PLAY")return;
+  cur.x+=d;let res=col(brd,cur);
+  if(res==="OBS")end("OVER","장애물에 부딪혔습니다!");
+  else if(res)cur.x-=d;
+}
 function rotP(){
   if(state!=="PLAY")return;
   let pm=cur.m;cur.m=cur.m.map((_,i)=>cur.m.map(r=>r[i]).reverse());
+  let res=col(brd,cur);
+  if(res==="OBS"){end("OVER","장애물에 부딪혔습니다!");return;}
   let off=1;
-  while(col(brd,cur)){cur.x+=off;off=-(off+(off>0?1:-1));if(off>cur.m.length){cur.m=pm;return;}}
+  while(res){
+    cur.x+=off;off=-(off+(off>0?1:-1));res=col(brd,cur);
+    if(res==="OBS"){end("OVER","장애물에 부딪혔습니다!");return;}
+    if(off>cur.m.length){cur.m=pm;return;}
+  }
 }
 function drop(){
   if(state!=="PLAY")return;
-  cur.y++;if(col(brd,cur)){cur.y--;merge(brd,cur);if(state==="PLAY")spawn();}dCnt=0;
+  cur.y++;let res=col(brd,cur);
+  if(res==="OBS"){end("OVER","장애물에 부딪혔습니다!");}
+  else if(res){cur.y--;merge(brd,cur);if(state==="PLAY")spawn();}
+  dCnt=0;
 }
 function hDrop(){
   if(state!=="PLAY")return;
-  while(!col(brd,cur))cur.y++;
+  let res=null;
+  while(!(res=col(brd,cur)))cur.y++;
+  if(res==="OBS"){end("OVER","장애물에 부딪혔습니다!");return;}
   cur.y--;merge(brd,cur);if(state==="PLAY")spawn();dCnt=0;
 }
-function end(s){state=s;reBtn.style.display="inline-block";}
+function end(s,msg=""){state=s;overMsg=msg;reBtn.style.display="inline-block";}
 function drawB(x,y,clr,obs=false){
   let px=OX+x*BS,py=y*BS;
   if(obs){
@@ -117,7 +138,7 @@ function draw(){
       ctx.fillStyle="#FFD700";ctx.font="bold 22px sans-serif";ctx.fillText(`획득 포인트: ${pts.toLocaleString()} P`,160,345);
     }else{
       ctx.fillStyle="#FF4B4B";ctx.font="bold 30px sans-serif";ctx.fillText("💥 게임 오버!",160,240);
-      ctx.fillStyle="#fff";ctx.font="16px sans-serif";ctx.fillText("블록이 천장에 닿았습니다.",160,285);
+      ctx.fillStyle="#fff";ctx.font="16px sans-serif";ctx.fillText(overMsg,160,285);
     }
   }
 }
