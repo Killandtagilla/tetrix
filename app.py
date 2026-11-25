@@ -3,8 +3,8 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="스피드 타워 쌓기", page_icon="🧱", layout="centered")
 
-st.title("🧱 초고속 타워 쌓기 (Speed Stacker)")
-st.markdown("움직이는 장애물과 강철 블록을 피해 **빨간색 목표선**에 가장 짧은 시간 안에 도달하세요!")
+st.title("🧱 초고속 타워 쌓기: 장애물 에디션")
+st.markdown("강철 블록, 움직이는 바, 레이저 빔을 피해 **빨간색 목표선**에 가장 빠르게 도달하세요!")
 
 game_html = """
 <!DOCTYPE html>
@@ -38,8 +38,15 @@ game_html = """
     background-color: #161b22;
     box-shadow: 0 0 20px rgba(0,0,0,0.5);
   }
+  .legend {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #ccc;
+  }
   .controls {
-    margin-top: 12px;
+    margin-top: 10px;
     font-size: 13px;
     color: #aaa;
     text-align: center;
@@ -68,10 +75,16 @@ game_html = """
 
 <canvas id="game" width="300" height="600"></canvas>
 
+<div class="legend">
+  <span>⬛ 강철벽(고정)</span>
+  <span>🟥 이동 바(충돌)</span>
+  <span>⚡ 레이저(블록 파괴)</span>
+</div>
+
 <button onclick="resetGame()">🔄 다시 시작 (R)</button>
 
 <div class="controls">
-  <b>[조작법]</b> 게임 화면을 한 번 클릭 후 키보드 사용<br>
+  <b>[조작법]</b> 게임 화면 클릭 후 키보드 사용<br>
   ⬅️ ➡️ 이동 | ⬆️ 회전 | ⬇️ 빠른 낙하 | <b>Space</b> 즉시 내리기
 </div>
 
@@ -82,29 +95,29 @@ const ctx = canvas.getContext('2d');
 const COLS = 10;
 const ROWS = 20;
 const BLOCK_SIZE = 30;
-const GOAL_ROW = 5; // 바닥에서 15칸 높이
+const GOAL_ROW = 5;
 
 const COLORS = [
   null,
-  '#FF0D72', // T
-  '#0DC2FF', // I
-  '#0DFF72', // S
-  '#F538FF', // Z
-  '#FF8E0D', // L
-  '#FFE138', // O
-  '#3877FF', // J
+  '#FF0D72', // 1: T
+  '#0DC2FF', // 2: I
+  '#0DFF72', // 3: S
+  '#F538FF', // 4: Z
+  '#FF8E0D', // 5: L
+  '#FFE138', // 6: O
+  '#3877FF', // 7: J
   '#6e7681'  // 8: 고정 강철 장애물
 ];
 
 const SHAPES = [
   [],
-  [[0, 1, 0], [1, 1, 1], [0, 0, 0]], // T
+  [[0, 1, 0], [1, 1, 1], [0, 0, 0]],             // T
   [[0, 2, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]], // I
-  [[0, 3, 3], [3, 3, 0], [0, 0, 0]], // S
-  [[4, 4, 0], [0, 4, 4], [0, 0, 0]], // Z
-  [[0, 0, 5], [5, 5, 5], [0, 0, 0]], // L
-  [[6, 6], [6, 6]], // O
-  [[7, 0, 0], [7, 7, 7], [0, 0, 0]] // J
+  [[0, 3, 3], [3, 3, 0], [0, 0, 0]],             // S
+  [[4, 4, 0], [0, 4, 4], [0, 0, 0]],             // Z
+  [[0, 0, 5], [5, 5, 5], [0, 0, 0]],             // L
+  [[6, 6], [6, 6]],                               // O
+  [[7, 0, 0], [7, 7, 7], [0, 0, 0]]              // J
 ];
 
 let board = [];
@@ -115,16 +128,23 @@ let lastTime = 0;
 let startTime = 0;
 let elapsedTime = 0;
 let isWin = false;
-let bestTime = localStorage.getItem('stacker_best_obs') || null;
+let bestTime = localStorage.getItem('stacker_best_v2') || null;
 
-// 움직이는 장애물 바 설정
-let movingObstacle = {
+// 1. 움직이는 방해 바
+let movingBar = {
   x: 0,
-  y: GOAL_ROW + 4, // 9번째 줄에서 좌우 이동
-  width: 3,        // 3칸 너비
+  y: GOAL_ROW + 4, // 9행
+  width: 3,
   dir: 1,
-  moveCounter: 0,
-  moveInterval: 280 // 0.28초마다 1칸 이동
+  timer: 0,
+  interval: 260
+};
+
+// 2. 주기적 레이저 빔 (특정 열의 최상단 블록 파괴)
+let laser = {
+  col: -1,
+  state: 'idle', // 'idle' -> 'warning' -> 'fire'
+  timer: 0
 };
 
 let earnedStars = "";
@@ -138,18 +158,13 @@ function createBoard() {
   return Array.from({length: ROWS}, () => Array(COLS).fill(0));
 }
 
-// 고정 강철 장애물 생성 (목표선과 움직이는 바를 피해 배치)
+// 강철 장애물 생성 (한 행에 최대 1개씩 배치하여 길 막힘 방지)
 function spawnStaticObstacles() {
-  let count = 0;
-  while (count < 6) {
-    const r = Math.floor(Math.random() * 10) + (GOAL_ROW + 2); // 7 ~ 16행 사이
+  const candidateRows =;
+  candidateRows.forEach(r => {
     const c = Math.floor(Math.random() * COLS);
-    // 움직이는 바의 행은 비워두고 배치
-    if (r !== movingObstacle.y && board[r][c] === 0) {
-      board[r][c] = 8;
-      count++;
-    }
-  }
+    board[r][c] = 8;
+  });
 }
 
 function calculateReward(time) {
@@ -165,22 +180,21 @@ function calculateReward(time) {
   }
 }
 
-function drawBlock(x, y, color, isObstacle = false) {
+function drawCell(x, y, color, isHazard = false) {
   ctx.fillStyle = color;
   ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
   ctx.strokeStyle = '#161b22';
   ctx.lineWidth = 2;
   ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
 
-  // 장애물 전용 X자/빗금 디테일 추가
-  if (isObstacle) {
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+  if (isHazard) {
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x * BLOCK_SIZE + 5, y * BLOCK_SIZE + 5);
-    ctx.lineTo((x + 1) * BLOCK_SIZE - 5, (y + 1) * BLOCK_SIZE - 5);
-    ctx.moveTo((x + 1) * BLOCK_SIZE - 5, y * BLOCK_SIZE + 5);
-    ctx.lineTo(x * BLOCK_SIZE + 5, (y + 1) * BLOCK_SIZE - 5);
+    ctx.moveTo(x * BLOCK_SIZE + 6, y * BLOCK_SIZE + 6);
+    ctx.lineTo((x + 1) * BLOCK_SIZE - 6, (y + 1) * BLOCK_SIZE - 6);
+    ctx.moveTo((x + 1) * BLOCK_SIZE - 6, y * BLOCK_SIZE + 6);
+    ctx.lineTo(x * BLOCK_SIZE + 6, (y + 1) * BLOCK_SIZE - 6);
     ctx.stroke();
   }
 }
@@ -189,15 +203,31 @@ function drawMatrix(matrix, offset) {
   matrix.forEach((row, y) => {
     row.forEach((value, x) => {
       if (value !== 0) {
-        drawBlock(x + offset.x, y + offset.y, COLORS[value], value === 8);
+        drawCell(x + offset.x, y + offset.y, COLORS[value], value === 8);
       }
     });
   });
 }
 
-function drawMovingObstacle() {
-  for (let i = 0; i < movingObstacle.width; i++) {
-    drawBlock(movingObstacle.x + i, movingObstacle.y, '#ff4b4b', true);
+function drawObstacles() {
+  // 움직이는 바 그리기
+  for (let i = 0; i < movingBar.width; i++) {
+    drawCell(movingBar.x + i, movingBar.y, '#ff4b4b', true);
+  }
+
+  // 레이저 경고 및 발사 효과 그리기
+  if (laser.col !== -1) {
+    const lx = laser.col * BLOCK_SIZE;
+    if (laser.state === 'warning') {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.18)';
+      ctx.fillRect(lx, 0, BLOCK_SIZE, canvas.height);
+      ctx.fillStyle = '#ffd700';
+      ctx.font = 'bold 14px Malgun Gothic';
+      ctx.fillText('⚠️', lx + 6, 22);
+    } else if (laser.state === 'fire') {
+      ctx.fillStyle = 'rgba(255, 50, 50, 0.65)';
+      ctx.fillRect(lx + 6, 0, BLOCK_SIZE - 12, canvas.height);
+    }
   }
 }
 
@@ -232,7 +262,7 @@ function draw() {
   }
 
   drawMatrix(board, {x: 0, y: 0});
-  drawMovingObstacle();
+  drawObstacles();
 
   if (!isWin) {
     drawMatrix(player.matrix, player.pos);
@@ -275,19 +305,15 @@ function collide(board, player) {
   for (let y = 0; y < m.length; ++y) {
     for (let x = 0; x < m[y].length; ++x) {
       if (m[y][x] !== 0) {
-        const boardY = y + o.y;
-        const boardX = x + o.x;
+        const by = y + o.y;
+        const bx = x + o.x;
 
-        // 보드 경계 및 고정 블록(강철 장애물 포함) 충돌 검사
-        if ((board[boardY] && board[boardY][boardX]) !== 0) {
+        // 벽, 바닥, 고정 블록 충돌
+        if (bx < 0 || bx >= COLS || by >= ROWS || (board[by] && board[by][bx]) !== 0) {
           return true;
         }
-        // 움직이는 장애물 바 충돌 검사
-        if (
-          boardY === movingObstacle.y &&
-          boardX >= movingObstacle.x &&
-          boardX < movingObstacle.x + movingObstacle.width
-        ) {
+        // 움직이는 방해 바 충돌
+        if (by === movingBar.y && bx >= movingBar.x && bx < movingBar.x + movingBar.width) {
           return true;
         }
       }
@@ -299,20 +325,16 @@ function collide(board, player) {
 function merge(board, player) {
   player.matrix.forEach((row, y) => {
     row.forEach((value, x) => {
-      if (value !== 0) {
-        if (y + player.pos.y >= 0) {
-          board[y + player.pos.y][x + player.pos.x] = value;
-        }
+      if (value !== 0 && y + player.pos.y >= 0) {
+        board[y + player.pos.y][x + player.pos.x] = value;
       }
     });
   });
 }
 
-// 빨간 목표선을 돌파(r < GOAL_ROW)해야 승리
 function checkWin() {
   for (let r = 0; r < GOAL_ROW; r++) {
     for (let c = 0; c < COLS; c++) {
-      // 고정 장애물(8)이 아닌 플레이어가 쌓은 블록만 인정
       if (board[r][c] !== 0 && board[r][c] !== 8) {
         return true;
       }
@@ -326,7 +348,7 @@ function handleWin() {
   calculateReward(elapsedTime);
   if (!bestTime || elapsedTime < parseFloat(bestTime)) {
     bestTime = elapsedTime.toFixed(2);
-    localStorage.setItem('stacker_best_obs', bestTime);
+    localStorage.setItem('stacker_best_v2', bestTime);
     document.getElementById('best').innerText = bestTime + '초';
   }
 }
@@ -390,19 +412,108 @@ function playerRotate(dir) {
     }
   }
 }
-
 function playerReset() {
-  const typeId = Math.floor(Math.random() * 7) + 1;
-  player.matrix = SHAPES[typeId].map(row => [...row]);
-  player.pos.y = 0;
-  player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
-
-  // 스폰 직후 블록이 막혀 더 이상 쌓을 수 없으면 보드 하단 일부 정리(소프트락 방지)
-  if (collide(board, player)) {
-    board.splice(ROWS - 3, 3);
-    board.unshift(...Array.from({length: 3}, () => Array(COLS).fill(0)));
-  }
+const typeId = Math.floor(Math.random() * 7) + 1;
+player.matrix = SHAPES[typeId].map(row => [...row]);
+player.pos.y = 0;
+player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
+// 입구가 막혀 움직일 수 없는 경우 맨 아래 2줄을 비워 진행 가능하게 유지
+if (collide(board, player)) {
+board.splice(ROWS - 2, 2);
+board.unshift(Array(COLS).fill(0), Array(COLS).fill(0));
 }
+}
+function updateObstacles(deltaTime) {
+// 1. 움직이는 방해 바 업데이트
+movingBar.timer += deltaTime;
+if (movingBar.timer >= movingBar.interval) {
+movingBar.timer = 0;
+const nextX = movingBar.x + movingBar.dir;
+// 벽에 닿거나 이동 경로에 블록이 있으면 방향 반전
+let blocked = nextX < 0 || nextX + movingBar.width > COLS;
+if (!blocked) {
+for (let i = 0; i < movingBar.width; i++) {
+if (board[movingBar.y][nextX + i] !== 0) {
+blocked = true;
+break;
+}
+}
+}
+if (blocked) {
+movingBar.dir *= -1;
+} else {
+movingBar.x = nextX;
+}
+}
+// 2. 레이저 빔 업데이트 (3.5초 대기 -> 1.2초 경고 -> 0.25초 발사)
+laser.timer += deltaTime;
+if (laser.state === 'idle' && laser.timer > 3500) {
+laser.col = Math.floor(Math.random() * COLS);
+laser.state = 'warning';
+laser.timer = 0;
+} else if (laser.state === 'warning' && laser.timer > 1200) {
+laser.state = 'fire';
+laser.timer = 0;
+// 해당 열의 가장 위에 있는 플레이어 블록 1칸 제거 (강철벽은 유지)
+for (let r = 0; r < ROWS; r++) {
+if (board[r][laser.col] !== 0 && board[r][laser.col] !== 8) {
+board[r][laser.col] = 0;
+break;
+}
+}
+} else if (laser.state === 'fire' && laser.timer > 250) {
+laser.state = 'idle';
+laser.col = -1;
+laser.timer = 0;
+}
+}
+function update(time = 0) {
+if (!isWin) {
+const deltaTime = time - lastTime;
+lastTime = time;
+dropCounter += deltaTime;
+if (dropCounter > dropInterval) {
+playerDrop();
+}
+updateObstacles(deltaTime);
+elapsedTime = (performance.now() - startTime) / 1000;
+document.getElementById('timer').innerText = elapsedTime.toFixed(2);
+}
+draw();
+requestAnimationFrame(update);
+}
+function resetGame() {
+board = createBoard();
+spawnStaticObstacles();
+movingBar.x = 0;
+movingBar.dir = 1;
+movingBar.timer = 0;
+laser = { col: -1, state: 'idle', timer: 0 };
+isWin = false;
+startTime = performance.now();
+elapsedTime = 0;
+dropCounter = 0;
+playerReset();
+}
+document.addEventListener('keydown', event => {
+if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
+event.preventDefault();
+}
+if (event.code === 'KeyR') {
+resetGame();
+return;
+}
+if (isWin) return;
+if (event.code === 'ArrowLeft') playerMove(-1);
+else if (event.code === 'ArrowRight') playerMove(1);
+else if (event.code === 'ArrowDown') playerDrop();
+else if (event.code === 'ArrowUp') playerRotate(1);
+else if (event.code === 'Space') playerHardDrop();
+});
+resetGame();
+update();
 
-function updateMovingObstacle(deltaTime) {
-  movingObstacle.moveCounter += deltaTime;
+
+
+"""
+components.html(game_html, height=760)
