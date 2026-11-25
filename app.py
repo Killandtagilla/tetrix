@@ -402,3 +402,91 @@ function draw() {
   ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
   ctx.stroke();
   ctx.setLineDash([]);
+ctx.fillStyle = "#FFD700";
+ctx.font = "bold 12px sans-serif";
+ctx.fillText("🏁 GOAL LINE (여기까지 쌓으세요!)", OFFSET_X + 5, goalY - 6);
+for (let r = 0; r < ROWS; r++) {
+for (let c = 0; c < COLS; c++) {
+if (board[r][c] === "OBS") {
+drawBlock(c, r, null, true);
+} else if (board[r][c] !== 0) {
+drawBlock(c, r, board[r][c], false);
+}
+}
+}
+if (gameState === "PLAYING" && currentPiece) {
+const m = currentPiece.matrix;
+for (let r = 0; r < m.length; r++) {
+for (let c = 0; c < m[r].length; c++) {
+if (m[r][c]) {
+drawBlock(currentPiece.x + c, currentPiece.y + r, currentPiece.color);
+}
+}
+}
+}
+if (gameState !== "PLAYING") {
+ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.textAlign = "center";
+if (gameState === "CLEAR") {
+const { stars, totalPoints } = calculateScore();
+const starText = "⭐".repeat(stars) + "☆".repeat(3 - stars);
+ctx.fillStyle = "#4CAF50";
+ctx.font = "bold 28px sans-serif";
+ctx.fillText("🎉 목표 높이 도달!", canvas.width / 2, 190);
+ctx.font = "38px sans-serif";
+ctx.fillText(starText, canvas.width / 2, 250);
+ctx.fillStyle = "#FFFFFF";
+ctx.font = "18px sans-serif";
+ctx.fillText(클리어 시간: ${elapsedTime.toFixed(2)}초, canvas.width / 2, 305);
+ctx.fillStyle = "#FFD700";
+ctx.font = "bold 22px sans-serif";
+ctx.fillText(획득 포인트: ${totalPoints.toLocaleString()} P, canvas.width / 2, 345);
+} else {
+ctx.fillStyle = "#FF4B4B";
+ctx.font = "bold 30px sans-serif";
+ctx.fillText("💥 게임 오버!", canvas.width / 2, 240);
+ctx.fillStyle = "#FFFFFF";
+ctx.font = "16px sans-serif";
+ctx.fillText("블록이 천장에 닿았습니다.", canvas.width / 2, 285);
+}
+}
+}
+function update(time = 0) {
+if (gameState === "PLAYING") {
+const deltaTime = time - lastTime;
+lastTime = time;
+elapsedTime = (time - startTime) / 1000;
+timerEl.innerText = elapsedTime.toFixed(1);
+dropCounter += deltaTime;
+if (dropCounter > 600) {
+playerDrop();
+}
+}
+draw();
+if (gameState === "PLAYING") {
+animId = requestAnimationFrame(update);
+}
+}
+canvas.addEventListener("click", () => canvas.focus());
+window.addEventListener("load", () => {
+window.focus();
+canvas.focus();
+});
+document.addEventListener("keydown", event => {
+if (gameState !== "PLAYING") return;
+if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
+event.preventDefault();
+}
+if (event.code === "ArrowLeft") moveLeft();
+else if (event.code === "ArrowRight") moveRight();
+else if (event.code === "ArrowDown") playerDrop();
+else if (event.code === "ArrowUp") playerRotate();
+else if (event.code === "Space") hardDrop();
+});
+initGame();
+
+
+
+"""
+components.html(game_html, height=740)
