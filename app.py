@@ -45,7 +45,10 @@ let brd=[],cur=null,nxt=null,stT=0,elT=0,dCnt=0,lT=0,state="PLAY",overMsg="",aid
 
 function mkBrd(){
   let b=Array.from({length:ROWS},()=>Array(COLS).fill(0));
-  [,,,,,,,,].forEach(([r,col])=>b[r][col]="OBS");
+  "16,2 16,3 13,6 13,7 10,1 10,2 7,4 7,5 7,6".split(" ").forEach(s=>{
+    let p=s.split(",");
+    b[Number(p[0])][Number(p[1])]="OBS";
+  });
   return b;
 }
 function rndP(){
