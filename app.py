@@ -412,3 +412,99 @@ function playerReset() {
   const typeId = Math.floor(Math.random() * 7) + 1;
   player.matrix = SHAPES[typeId].map(row => [...row]);
   player.pos.y = 0;
+player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
+if (collide(board, player)) {
+board.splice(ROWS - 2, 2);
+board.unshift(Array(COLS).fill(0), Array(COLS).fill(0));
+}
+}
+function updateObstacles(deltaTime) {
+movingBar.timer += deltaTime;
+if (movingBar.timer >= movingBar.interval) {
+movingBar.timer = 0;
+const nextX = movingBar.x + movingBar.dir;
+let blocked = nextX < 0 || nextX + movingBar.width > COLS;
+if (!blocked) {
+for (let i = 0; i < movingBar.width; i++) {
+if (board[movingBar.y][nextX + i] !== 0) {
+blocked = true;
+break;
+}
+}
+}
+if (blocked) {
+movingBar.dir *= -1;
+} else {
+movingBar.x = nextX;
+}
+}
+laser.timer += deltaTime;
+if (laser.state === 'idle' && laser.timer > 3500) {
+laser.col = Math.floor(Math.random() * COLS);
+laser.state = 'warning';
+laser.timer = 0;
+} else if (laser.state === 'warning' && laser.timer > 1200) {
+laser.state = 'fire';
+laser.timer = 0;
+for (let r = 0; r < ROWS; r++) {
+if (board[r][laser.col] !== 0 && board[r][laser.col] !== 8) {
+board[r][laser.col] = 0;
+break;
+}
+}
+} else if (laser.state === 'fire' && laser.timer > 250) {
+laser.state = 'idle';
+laser.col = -1;
+laser.timer = 0;
+}
+}
+function update(time = 0) {
+if (!isWin) {
+const deltaTime = time - lastTime;
+lastTime = time;
+dropCounter += deltaTime;
+if (dropCounter > dropInterval) {
+playerDrop();
+}
+updateObstacles(deltaTime);
+elapsedTime = (performance.now() - startTime) / 1000;
+document.getElementById('timer').innerText = elapsedTime.toFixed(2);
+}
+draw();
+requestAnimationFrame(update);
+}
+function resetGame() {
+board = createBoard();
+spawnStaticObstacles();
+movingBar.x = 0;
+movingBar.dir = 1;
+movingBar.timer = 0;
+laser = { col: -1, state: 'idle', timer: 0 };
+isWin = false;
+startTime = performance.now();
+elapsedTime = 0;
+dropCounter = 0;
+playerReset();
+}
+document.addEventListener('keydown', event => {
+if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
+event.preventDefault();
+}
+if (event.code === 'KeyR') {
+resetGame();
+return;
+}
+if (isWin) return;
+if (event.code === 'ArrowLeft') playerMove(-1);
+else if (event.code === 'ArrowRight') playerMove(1);
+else if (event.code === 'ArrowDown') playerDrop();
+else if (event.code === 'ArrowUp') playerRotate(1);
+else if (event.code === 'Space') playerHardDrop();
+});
+resetGame();
+update();
+
+
+
+"""
+components.html(game_html, height=760)
