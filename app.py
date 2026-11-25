@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="테트리스 클라이머", page_icon="🧱", layout="centered")
 
 st.title("🧱 테트리스 클라이머 (Tetris Climber)")
-st.markdown("고정된 **붉은 장애물**을 피해 블록을 쌓아 **목표 라인(노란 점선)**까지 최대한 빠르게 올라가세요!")
+st.markdown("게임 화면을 **한 번 클릭**한 뒤 방향키와 스페이스바로 조작하세요!")
 
 game_html = """
 <!DOCTYPE html>
@@ -58,6 +58,8 @@ game_html = """
     border-radius: 8px;
     background-color: #1e2130;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    outline: none;
+    cursor: pointer;
   }
   #controls-guide {
     margin-top: 10px;
@@ -65,18 +67,29 @@ game_html = """
     color: #bbb;
     text-align: center;
   }
+  .btn-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
   button {
-    margin-top: 12px;
-    padding: 10px 25px;
-    font-size: 16px;
+    padding: 8px 14px;
+    font-size: 14px;
     font-weight: bold;
-    background-color: #4CAF50;
+    background-color: #2b3044;
     color: white;
-    border: none;
+    border: 1px solid #4a5270;
     border-radius: 5px;
     cursor: pointer;
   }
-  button:hover { background-color: #45a049; }
+  button:hover { background-color: #3c435e; }
+  #restartBtn {
+    background-color: #4CAF50;
+    border: none;
+    padding: 10px 25px;
+    font-size: 16px;
+  }
+  #restartBtn:hover { background-color: #45a049; }
 </style>
 </head>
 <body>
@@ -92,12 +105,23 @@ game_html = """
   </div>
 </div>
 
-<canvas id="gameCanvas" width="320" height="560"></canvas>
+<canvas id="gameCanvas" width="320" height="560" tabindex="0"></canvas>
+
+<div class="btn-group">
+  <button onclick="moveLeft()">⬅️</button>
+  <button onclick="playerRotate()">🔄 회전</button>
+  <button onclick="moveRight()">➡️</button>
+  <button onclick="playerDrop()">⬇️</button>
+  <button onclick="hardDrop()">⏬ 낙하</button>
+</div>
 
 <div id="controls-guide">
-  ⬅️➡️ 이동 | ⬆️ 회전 | ⬇️ 빠르게 내리기 | <b>Space</b> 즉시 떨어뜨리기
+  키보드: ⬅️➡️ 이동 | ⬆️ 회전 | ⬇️ 내리기 | <b>Space</b> 즉시 낙하
 </div>
-<button id="restartBtn" onclick="initGame()" style="display:none;">다시 시작</button>
+
+<div class="btn-group">
+  <button id="restartBtn" onclick="initGame()" style="display:none;">다시 시작</button>
+</div>
 
 <script>
 const canvas = document.getElementById("gameCanvas");
@@ -111,19 +135,60 @@ const restartBtn = document.getElementById("restartBtn");
 
 const COLS = 10;
 const ROWS = 20;
-const BLOCK_SIZE = 28; // 10*28 = 280 (여백 포함 320), 20*28 = 560
+const BLOCK_SIZE = 28;
 const OFFSET_X = 20;
-const GOAL_ROW = 4; // 위에서 4번째 줄 (바닥 기준 16층 높이)
+const GOAL_ROW = 4;
 
-// 테트리스 블록 모양 및 색상
 const SHAPES = [
-  { matrix: [[1, 1, 1, 1]], color: "#00F0F0" },          // I
-  { matrix: [[1, 1], [1, 1]], color: "#F0F000" },        // O
-  { matrix: [[0, 1, 0], [1, 1, 1]], color: "#A000F0" },  // T
-  { matrix: [[1, 0, 0], [1, 1, 1]], color: "#0000F0" },  // J
-  { matrix: [[0, 0, 1], [1, 1, 1]], color: "#F0A000" },  // L
-  { matrix: [[0, 1, 1], [1, 1, 0]], color: "#00F000" },  // S
-  { matrix: [[1, 1, 0], [0, 1, 1]], color: "#F00000" }   // Z
+  {
+    color: "#00F0F0",
+    matrix: [,
+ ,
+ ,
+      [0, 0, 0, 0]
+    ]
+  },
+  {
+    color: "#F0F000",
+    matrix: [,
+      [1, 1]
+    ]
+  },
+  {
+    color: "#A000F0",
+    matrix: [,
+ ,
+      [0, 0, 0]
+    ]
+  },
+  {
+    color: "#2979FF",
+    matrix: [,
+ ,
+      [0, 0, 0]
+    ]
+  },
+  {
+    color: "#FF9100",
+    matrix: [,
+ ,
+      [0, 0, 0]
+    ]
+  },
+  {
+    color: "#00E676",
+    matrix: [,
+ ,
+      [0, 0, 0]
+    ]
+  },
+  {
+    color: "#FF1744",
+    matrix: [,
+ ,
+      [0, 0, 0]
+    ]
+  }
 ];
 
 let board = [];
@@ -133,20 +198,17 @@ let startTime = 0;
 let elapsedTime = 0;
 let dropCounter = 0;
 let lastTime = 0;
-let gameState = "PLAYING"; // PLAYING, GAMEOVER, CLEAR
+let gameState = "PLAYING";
+let animId = null;
 
-// 보드 초기화 및 고정 장애물 배치
 function createBoard() {
   const b = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  
-  // 고정 장애물(문자열 "OBS") 배치 - 올라가는 길목을 방해하는 위치
   const obstacles = [
     { r: 16, c: 2 }, { r: 16, c: 3 },
     { r: 13, c: 6 }, { r: 13, c: 7 },
     { r: 10, c: 1 }, { r: 10, c: 2 },
     { r: 7, c: 4 },  { r: 7, c: 5 }, { r: 7, c: 6 }
   ];
-  
   obstacles.forEach(obs => {
     b[obs.r][obs.c] = "OBS";
   });
@@ -158,7 +220,7 @@ function getRandomPiece() {
   return {
     matrix: shape.matrix.map(row => [...row]),
     color: shape.color,
-    x: Math.floor(COLS / 2) - Math.ceil(shape.matrix[0].length / 2),
+    x: Math.floor(COLS / 2) - Math.ceil(shape.matrix.length / 2),
     y: 0
   };
 }
@@ -173,7 +235,10 @@ function initGame() {
   gameState = "PLAYING";
   restartBtn.style.display = "none";
   heightEl.innerText = "0";
-  requestAnimationFrame(update);
+  canvas.focus();
+
+  if (animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(update);
 }
 
 function spawnPiece() {
@@ -181,7 +246,6 @@ function spawnPiece() {
   nextPiece = getRandomPiece();
   drawNextPiece();
 
-  // 생성되자마자 충돌하면 게임 오버
   if (collide(board, currentPiece)) {
     endGame("GAMEOVER");
   }
@@ -190,8 +254,8 @@ function spawnPiece() {
 function drawNextPiece() {
   nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
   const m = nextPiece.matrix;
-  const size = 16;
-  const startX = (nextCanvas.width - m[0].length * size) / 2;
+  const size = 14;
+  const startX = (nextCanvas.width - m.length * size) / 2;
   const startY = (nextCanvas.height - m.length * size) / 2;
 
   for (let r = 0; r < m.length; r++) {
@@ -237,7 +301,6 @@ function merge(b, piece) {
     }
   }
 
-  // 현재 쌓인 최고 높이 계산
   let currentMaxHeight = 0;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -248,25 +311,36 @@ function merge(b, piece) {
   }
   heightEl.innerText = Math.min(16, currentMaxHeight);
 
-  // 목표 라인(GOAL_ROW) 이상 도달 시 클리어!
   if (highestRow <= GOAL_ROW) {
     endGame("CLEAR");
   }
 }
 
 function rotate(matrix) {
-  return matrix[0].map((_, index) => matrix.map(col => col[index]).reverse());
+  return matrix.map((_, index) => matrix.map(row => row[index]).reverse());
+}
+
+function moveLeft() {
+  if (gameState !== "PLAYING") return;
+  currentPiece.x--;
+  if (collide(board, currentPiece)) currentPiece.x++;
+}
+
+function moveRight() {
+  if (gameState !== "PLAYING") return;
+  currentPiece.x++;
+  if (collide(board, currentPiece)) currentPiece.x--;
 }
 
 function playerRotate() {
+  if (gameState !== "PLAYING") return;
   const prevMatrix = currentPiece.matrix;
   currentPiece.matrix = rotate(currentPiece.matrix);
-  // 벽에 붙어서 회전할 때 위치 보정
   let offset = 1;
   while (collide(board, currentPiece)) {
     currentPiece.x += offset;
     offset = -(offset + (offset > 0 ? 1 : -1));
-    if (offset > currentPiece.matrix[0].length) {
+    if (offset > currentPiece.matrix.length) {
       currentPiece.matrix = prevMatrix;
       return;
     }
@@ -274,6 +348,7 @@ function playerRotate() {
 }
 
 function playerDrop() {
+  if (gameState !== "PLAYING") return;
   currentPiece.y++;
   if (collide(board, currentPiece)) {
     currentPiece.y--;
@@ -286,6 +361,7 @@ function playerDrop() {
 }
 
 function hardDrop() {
+  if (gameState !== "PLAYING") return;
   while (!collide(board, currentPiece)) {
     currentPiece.y++;
   }
@@ -299,7 +375,7 @@ function hardDrop() {
 
 function endGame(state) {
   gameState = state;
-  restartBtn.style.display = "block";
+  restartBtn.style.display = "inline-block";
 }
 
 function calculateScore() {
@@ -317,7 +393,6 @@ function drawBlock(x, y, color, isObs = false) {
   const py = y * BLOCK_SIZE;
   
   if (isObs) {
-    // 고정 장애물 디자인 (붉은 경고 블록)
     ctx.fillStyle = "#D32F2F";
     ctx.fillRect(px, py, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
     ctx.strokeStyle = "#FFCDD2";
@@ -337,11 +412,9 @@ function drawBlock(x, y, color, isObs = false) {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 게임 영역 배경 테두리
   ctx.fillStyle = "#131520";
   ctx.fillRect(OFFSET_X, 0, COLS * BLOCK_SIZE, ROWS * BLOCK_SIZE);
 
-  // 그리드 선
   ctx.strokeStyle = "#1f2336";
   ctx.lineWidth = 1;
   for (let r = 0; r <= ROWS; r++) {
@@ -357,44 +430,37 @@ function draw() {
     ctx.stroke();
   }
 
-  // 목표 결승선 (GOAL_ROW)
   const goalY = GOAL_ROW * BLOCK_SIZE;
   ctx.strokeStyle = "#FFD700";
   ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.beginPath();
-  ctx.moveTo(OFFSET_X, goalY);
-  ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#FFD700";
-  ctx.font = "bold 12px sans-serif";
-  ctx.fillText("🏁 GOAL LINE (여기까지 쌓으세요!)", OFFSET_X + 5, goalY - 6);
-
-  // 보드에 쌓인 블록 및 고정 장애물 그리기
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (board[r][c] === "OBS") {
-        drawBlock(c, r, null, true);
-      } else if (board[r][c] !== 0) {
-        drawBlock(c, r, board[r][c], false);
-      }
-    }
-  }
-
-  // 현재 조작 중인 블록 그리기
-  if (gameState === "PLAYING" && currentPiece) {
-    const m = currentPiece.matrix;
-    for (let r = 0; r < m.length; r++) {
-      for (let c = 0; c < m[r].length; c++) {
-        if (m[r][c]) {
-          drawBlock(currentPiece.x + c, currentPiece.y + r, currentPiece.color);
-        }
-      }
-    }
-  }
-
-  // 종료 화면 오버레이
+ctx.setLineDash([6, 4]);
+ctx.beginPath();
+ctx.moveTo(OFFSET_X, goalY);
+ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
+ctx.stroke();
+ctx.setLineDash([]);
+ctx.fillStyle = "#FFD700";
+ctx.font = "bold 12px sans-serif";
+ctx.fillText("🏁 GOAL LINE (여기까지 쌓으세요!)", OFFSET_X + 5, goalY - 6);
+for (let r = 0; r < ROWS; r++) {
+for (let c = 0; c < COLS; c++) {
+if (board[r][c] === "OBS") {
+drawBlock(c, r, null, true);
+} else if (board[r][c] !== 0) {
+drawBlock(c, r, board[r][c], false);
+}
+}
+}
+if (gameState === "PLAYING" && currentPiece) {
+const m = currentPiece.matrix;
+for (let r = 0; r < m.length; r++) {
+for (let c = 0; c < m[r].length; c++) {
+if (m[r][c]) {
+drawBlock(currentPiece.x + c, currentPiece.y + r, currentPiece.color);
+}
+}
+}
+}
 if (gameState !== "PLAYING") {
 ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -430,38 +496,34 @@ lastTime = time;
 elapsedTime = (time - startTime) / 1000;
 timerEl.innerText = elapsedTime.toFixed(1);
 dropCounter += deltaTime;
-if (dropCounter > 600) { // 0.6초마다 한 칸씩 자동 하강
+if (dropCounter > 600) {
 playerDrop();
 }
 }
 draw();
 if (gameState === "PLAYING") {
-requestAnimationFrame(update);
+animId = requestAnimationFrame(update);
 }
 }
-// 키보드 조작 이벤트
-window.addEventListener("keydown", event => {
+canvas.addEventListener("click", () => canvas.focus());
+window.addEventListener("load", () => {
+window.focus();
+canvas.focus();
+});
+document.addEventListener("keydown", event => {
 if (gameState !== "PLAYING") return;
 if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
 event.preventDefault();
 }
-if (event.code === "ArrowLeft") {
-currentPiece.x--;
-if (collide(board, currentPiece)) currentPiece.x++;
-} else if (event.code === "ArrowRight") {
-currentPiece.x++;
-if (collide(board, currentPiece)) currentPiece.x--;
-} else if (event.code === "ArrowDown") {
-playerDrop();
-} else if (event.code === "ArrowUp") {
-playerRotate();
-} else if (event.code === "Space") {
-hardDrop();
-}
+if (event.code === "ArrowLeft") moveLeft();
+else if (event.code === "ArrowRight") moveRight();
+else if (event.code === "ArrowDown") playerDrop();
+else if (event.code === "ArrowUp") playerRotate();
+else if (event.code === "Space") hardDrop();
 });
 initGame();
 
 
 
 """
-components.html(game_html, height=690)
+components.html(game_html, height=740)
