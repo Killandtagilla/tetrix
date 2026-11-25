@@ -1,12 +1,11 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="스카이 빌더 - 장애물 블록 쌓기", page_icon="🧱", layout="centered")
+st.set_page_config(page_title="테트리스 클라이머", page_icon="🧱", layout="centered")
 
-st.title("🧱 스카이 빌더 (Sky Builder)")
-st.markdown("**스페이스바(Space)** 또는 **화면 클릭**으로 블록을 멈춰서 장애물을 피해 20층까지 빠르게 올라가세요!")
+st.title("🧱 테트리스 클라이머 (Tetris Climber)")
+st.markdown("고정된 **붉은 장애물**을 피해 블록을 쌓아 **목표 라인(노란 점선)**까지 최대한 빠르게 올라가세요!")
 
-# HTML5 Canvas + JavaScript 게임 엔진
 game_html = """
 <!DOCTYPE html>
 <html>
@@ -22,23 +21,52 @@ game_html = """
     font-family: 'Malgun Gothic', sans-serif;
     user-select: none;
   }
-  canvas {
+  #top-bar {
+    width: 320px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1e2130;
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 2px solid #333952;
+    margin-bottom: 10px;
+    box-sizing: border-box;
+  }
+  .info-box {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 16px;
+    font-weight: bold;
+  }
+  #next-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 12px;
+    color: #aaa;
+  }
+  #nextCanvas {
+    background-color: #131520;
+    border: 1px solid #444;
+    border-radius: 4px;
+    margin-top: 3px;
+  }
+  #gameCanvas {
     border: 3px solid #4CAF50;
     border-radius: 8px;
     background-color: #1e2130;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    cursor: pointer;
   }
-  #ui-panel {
-    width: 400px;
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    font-size: 18px;
-    font-weight: bold;
+  #controls-guide {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #bbb;
+    text-align: center;
   }
   button {
-    margin-top: 15px;
+    margin-top: 12px;
     padding: 10px 25px;
     font-size: 16px;
     font-weight: bold;
@@ -53,115 +81,220 @@ game_html = """
 </head>
 <body>
 
-<div id="ui-panel">
-  <span>층수: <span id="floor">0</span> / 20</span>
-  <span>시간: <span id="timer">0.0</span>초</span>
+<div id="top-bar">
+  <div class="info-box">
+    <span>⏱️ 시간: <span id="timer">0.0</span>초</span>
+    <span>📏 높이: <span id="height">0</span> / 16층</span>
+  </div>
+  <div id="next-box">
+    <span>NEXT</span>
+    <canvas id="nextCanvas" width="80" height="60"></canvas>
+  </div>
 </div>
 
-<canvas id="gameCanvas" width="400" height="550"></canvas>
+<canvas id="gameCanvas" width="320" height="560"></canvas>
+
+<div id="controls-guide">
+  ⬅️➡️ 이동 | ⬆️ 회전 | ⬇️ 빠르게 내리기 | <b>Space</b> 즉시 떨어뜨리기
+</div>
 <button id="restartBtn" onclick="initGame()" style="display:none;">다시 시작</button>
 
 <script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
-const floorEl = document.getElementById("floor");
+const nextCanvas = document.getElementById("nextCanvas");
+const nextCtx = nextCanvas.getContext("2d");
+
 const timerEl = document.getElementById("timer");
+const heightEl = document.getElementById("height");
 const restartBtn = document.getElementById("restartBtn");
 
-const TARGET_FLOORS = 20;
-const BLOCK_HEIGHT = 22;
-let blocks = [];
-let currentBlock = {};
-let obstacles = [];
-let cameraY = 0;
+const COLS = 10;
+const ROWS = 20;
+const BLOCK_SIZE = 28; // 10*28 = 280 (여백 포함 320), 20*28 = 560
+const OFFSET_X = 20;
+const GOAL_ROW = 4; // 위에서 4번째 줄 (바닥 기준 16층 높이)
+
+// 테트리스 블록 모양 및 색상
+const SHAPES = [
+  { matrix: [[1, 1, 1, 1]], color: "#00F0F0" },          // I
+  { matrix: [[1, 1], [1, 1]], color: "#F0F000" },        // O
+  { matrix: [[0, 1, 0], [1, 1, 1]], color: "#A000F0" },  // T
+  { matrix: [[1, 0, 0], [1, 1, 1]], color: "#0000F0" },  // J
+  { matrix: [[0, 0, 1], [1, 1, 1]], color: "#F0A000" },  // L
+  { matrix: [[0, 1, 1], [1, 1, 0]], color: "#00F000" },  // S
+  { matrix: [[1, 1, 0], [0, 1, 1]], color: "#F00000" }   // Z
+];
+
+let board = [];
+let currentPiece = null;
+let nextPiece = null;
 let startTime = 0;
 let elapsedTime = 0;
+let dropCounter = 0;
+let lastTime = 0;
 let gameState = "PLAYING"; // PLAYING, GAMEOVER, CLEAR
-let animationId;
+
+// 보드 초기화 및 고정 장애물 배치
+function createBoard() {
+  const b = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  
+  // 고정 장애물(문자열 "OBS") 배치 - 올라가는 길목을 방해하는 위치
+  const obstacles = [
+    { r: 16, c: 2 }, { r: 16, c: 3 },
+    { r: 13, c: 6 }, { r: 13, c: 7 },
+    { r: 10, c: 1 }, { r: 10, c: 2 },
+    { r: 7, c: 4 },  { r: 7, c: 5 }, { r: 7, c: 6 }
+  ];
+  
+  obstacles.forEach(obs => {
+    b[obs.r][obs.c] = "OBS";
+  });
+  return b;
+}
+
+function getRandomPiece() {
+  const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+  return {
+    matrix: shape.matrix.map(row => [...row]),
+    color: shape.color,
+    x: Math.floor(COLS / 2) - Math.ceil(shape.matrix[0].length / 2),
+    y: 0
+  };
+}
 
 function initGame() {
-  blocks = [{ x: 100, y: 500, width: 200, color: "#4CAF50" }];
-  obstacles = [];
-  cameraY = 0;
+  board = createBoard();
+  nextPiece = getRandomPiece();
+  spawnPiece();
+  startTime = performance.now();
+  lastTime = startTime;
+  dropCounter = 0;
   gameState = "PLAYING";
   restartBtn.style.display = "none";
-  startTime = performance.now();
-  
-  // 4층 간격으로 움직이는 장애물 생성
-  for (let i = 4; i < TARGET_FLOORS; i += 4) {
-    obstacles.push({
-      floor: i,
-      y: 500 - (i * BLOCK_HEIGHT) - 10,
-      x: Math.random() * 250,
-      width: 110,
-      height: 8,
-      speed: 2.5 + (i * 0.15),
-      dir: Math.random() > 0.5 ? 1 : -1
-    });
-  }
-  
-  spawnBlock();
-  if (animationId) cancelAnimationFrame(animationId);
-  gameLoop();
+  heightEl.innerText = "0";
+  requestAnimationFrame(update);
 }
 
-function spawnBlock() {
-  const prevBlock = blocks[blocks.length - 1];
-  const floor = blocks.length;
-  const speed = 3 + (floor * 0.25); // 올라갈수록 빨라짐
-  
-  currentBlock = {
-    x: 0,
-    y: prevBlock.y - BLOCK_HEIGHT,
-    width: prevBlock.width,
-    speed: speed,
-    dir: 1,
-    color: `hsl(${(floor * 18) % 360}, 75%, 55%)`
-  };
-  
-  // 카메라 시점 위로 이동
-  if (floor > 10) {
-    cameraY = (floor - 10) * BLOCK_HEIGHT;
-  }
-}
+function spawnPiece() {
+  currentPiece = nextPiece;
+  nextPiece = getRandomPiece();
+  drawNextPiece();
 
-function placeBlock() {
-  if (gameState !== "PLAYING") return;
-
-  const prevBlock = blocks[blocks.length - 1];
-  const delta = currentBlock.x - prevBlock.x;
-  const overlap = prevBlock.width - Math.abs(delta);
-
-  // 1. 블록을 완전히 놓쳤을 경우
-  if (overlap <= 0) {
+  // 생성되자마자 충돌하면 게임 오버
+  if (collide(board, currentPiece)) {
     endGame("GAMEOVER");
-    return;
   }
+}
 
-  // 2. 장애물 충돌 체크
-  const currentFloor = blocks.length;
-  for (let obs of obstacles) {
-    if (obs.floor === currentFloor) {
-      if (currentBlock.x < obs.x + obs.width && currentBlock.x + currentBlock.width > obs.x) {
-        endGame("GAMEOVER");
-        return;
+function drawNextPiece() {
+  nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+  const m = nextPiece.matrix;
+  const size = 16;
+  const startX = (nextCanvas.width - m[0].length * size) / 2;
+  const startY = (nextCanvas.height - m.length * size) / 2;
+
+  for (let r = 0; r < m.length; r++) {
+    for (let c = 0; c < m[r].length; c++) {
+      if (m[r][c]) {
+        nextCtx.fillStyle = nextPiece.color;
+        nextCtx.fillRect(startX + c * size, startY + r * size, size - 1, size - 1);
+      }
+    }
+  }
+}
+
+function collide(b, piece) {
+  const m = piece.matrix;
+  for (let r = 0; r < m.length; r++) {
+    for (let c = 0; c < m[r].length; c++) {
+      if (m[r][c]) {
+        const newY = piece.y + r;
+        const newX = piece.x + c;
+        if (newX < 0 || newX >= COLS || newY >= ROWS || (newY >= 0 && b[newY][newX] !== 0)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function merge(b, piece) {
+  const m = piece.matrix;
+  let highestRow = ROWS;
+
+  for (let r = 0; r < m.length; r++) {
+    for (let c = 0; c < m[r].length; c++) {
+      if (m[r][c]) {
+        const boardY = piece.y + r;
+        const boardX = piece.x + c;
+        if (boardY >= 0) {
+          b[boardY][boardX] = piece.color;
+          if (boardY < highestRow) highestRow = boardY;
+        }
       }
     }
   }
 
-  // 잘린 만큼 블록 크기 조정 후 고정
-  currentBlock.width = overlap;
-  currentBlock.x = delta > 0 ? currentBlock.x : prevBlock.x;
-  blocks.push({ ...currentBlock });
-  
-  floorEl.innerText = blocks.length - 1;
-
-  // 목표 층수 도달 체크
-  if (blocks.length - 1 >= TARGET_FLOORS) {
-    endGame("CLEAR");
-  } else {
-    spawnBlock();
+  // 현재 쌓인 최고 높이 계산
+  let currentMaxHeight = 0;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (b[r][c] !== 0 && b[r][c] !== "OBS") {
+        currentMaxHeight = Math.max(currentMaxHeight, ROWS - r);
+      }
+    }
   }
+  heightEl.innerText = Math.min(16, currentMaxHeight);
+
+  // 목표 라인(GOAL_ROW) 이상 도달 시 클리어!
+  if (highestRow <= GOAL_ROW) {
+    endGame("CLEAR");
+  }
+}
+
+function rotate(matrix) {
+  return matrix[0].map((_, index) => matrix.map(col => col[index]).reverse());
+}
+
+function playerRotate() {
+  const prevMatrix = currentPiece.matrix;
+  currentPiece.matrix = rotate(currentPiece.matrix);
+  // 벽에 붙어서 회전할 때 위치 보정
+  let offset = 1;
+  while (collide(board, currentPiece)) {
+    currentPiece.x += offset;
+    offset = -(offset + (offset > 0 ? 1 : -1));
+    if (offset > currentPiece.matrix[0].length) {
+      currentPiece.matrix = prevMatrix;
+      return;
+    }
+  }
+}
+
+function playerDrop() {
+  currentPiece.y++;
+  if (collide(board, currentPiece)) {
+    currentPiece.y--;
+    merge(board, currentPiece);
+    if (gameState === "PLAYING") {
+      spawnPiece();
+    }
+  }
+  dropCounter = 0;
+}
+
+function hardDrop() {
+  while (!collide(board, currentPiece)) {
+    currentPiece.y++;
+  }
+  currentPiece.y--;
+  merge(board, currentPiece);
+  if (gameState === "PLAYING") {
+    spawnPiece();
+  }
+  dropCounter = 0;
 }
 
 function endGame(state) {
@@ -171,135 +304,164 @@ function endGame(state) {
 
 function calculateScore() {
   let stars = 1;
-  if (elapsedTime <= 18.0) stars = 3;
-  else if (elapsedTime <= 28.0) stars = 2;
+  if (elapsedTime <= 25.0) stars = 3;
+  else if (elapsedTime <= 45.0) stars = 2;
 
-  // 기본 1000점 + 시간 보너스 + 남은 블록 너비 보너스
-  const timeBonus = Math.max(0, Math.floor((40 - elapsedTime) * 50));
-  const widthBonus = Math.floor(blocks[blocks.length - 1].width * 5);
-  const totalPoints = 1000 + timeBonus + widthBonus;
-
+  const timeBonus = Math.max(0, Math.floor((60 - elapsedTime) * 40));
+  const totalPoints = 1000 + timeBonus;
   return { stars, totalPoints };
 }
 
-function update() {
-  if (gameState !== "PLAYING") return;
-
-  elapsedTime = (performance.now() - startTime) / 1000;
-  timerEl.innerText = elapsedTime.toFixed(1);
-
-  // 현재 블록 좌우 이동
-  currentBlock.x += currentBlock.speed * currentBlock.dir;
-  if (currentBlock.x + currentBlock.width > canvas.width) {
-    currentBlock.x = canvas.width - currentBlock.width;
-    currentBlock.dir = -1;
-  } else if (currentBlock.x < 0) {
-    currentBlock.x = 0;
-    currentBlock.dir = 1;
-  }
-
-  // 장애물 좌우 이동
-  for (let obs of obstacles) {
-    obs.x += obs.speed * obs.dir;
-    if (obs.x + obs.width > canvas.width || obs.x < 0) {
-      obs.dir *= -1;
-    }
+function drawBlock(x, y, color, isObs = false) {
+  const px = OFFSET_X + x * BLOCK_SIZE;
+  const py = y * BLOCK_SIZE;
+  
+  if (isObs) {
+    // 고정 장애물 디자인 (붉은 경고 블록)
+    ctx.fillStyle = "#D32F2F";
+    ctx.fillRect(px, py, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
+    ctx.strokeStyle = "#FFCDD2";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px + 4, py + 4);
+    ctx.lineTo(px + BLOCK_SIZE - 5, py + BLOCK_SIZE - 5);
+    ctx.moveTo(px + BLOCK_SIZE - 5, py + 4);
+    ctx.lineTo(px + 4, py + BLOCK_SIZE - 5);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = color;
+    ctx.fillRect(px, py, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
   }
 }
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.translate(0, cameraY);
 
-  // 목표 결승선 그리기
-  const finishY = 500 - (TARGET_FLOORS * BLOCK_HEIGHT);
+  // 게임 영역 배경 테두리
+  ctx.fillStyle = "#131520";
+  ctx.fillRect(OFFSET_X, 0, COLS * BLOCK_SIZE, ROWS * BLOCK_SIZE);
+
+  // 그리드 선
+  ctx.strokeStyle = "#1f2336";
+  ctx.lineWidth = 1;
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(OFFSET_X, r * BLOCK_SIZE);
+    ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, r * BLOCK_SIZE);
+    ctx.stroke();
+  }
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(OFFSET_X + c * BLOCK_SIZE, 0);
+    ctx.lineTo(OFFSET_X + c * BLOCK_SIZE, ROWS * BLOCK_SIZE);
+    ctx.stroke();
+  }
+
+  // 목표 결승선 (GOAL_ROW)
+  const goalY = GOAL_ROW * BLOCK_SIZE;
   ctx.strokeStyle = "#FFD700";
-  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
   ctx.beginPath();
-  ctx.moveTo(0, finishY);
-  ctx.lineTo(canvas.width, finishY);
+  ctx.moveTo(OFFSET_X, goalY);
+  ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = "#FFD700";
-  ctx.fillText("🏁 GOAL (20층)", 10, finishY - 5);
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillText("🏁 GOAL LINE (여기까지 쌓으세요!)", OFFSET_X + 5, goalY - 6);
 
-  // 쌓인 블록 그리기
-  for (let b of blocks) {
-    ctx.fillStyle = b.color;
-    ctx.fillRect(b.x, b.y, b.width, BLOCK_HEIGHT - 2);
-  }
-
-  // 움직이는 현재 블록 그리기
-  if (gameState === "PLAYING") {
-    ctx.fillStyle = currentBlock.color;
-    ctx.fillRect(currentBlock.x, currentBlock.y, currentBlock.width, BLOCK_HEIGHT - 2);
-  }
-
-  // 장애물(붉은 레이저) 그리기
-  for (let obs of obstacles) {
-    ctx.fillStyle = "#FF4B4B";
-    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-  }
-
-  ctx.restore();
-
-  // 게임 종료 오버레이 화면
-  if (gameState !== "PLAYING") {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.textAlign = "center";
-    if (gameState === "CLEAR") {
-      const { stars, totalPoints } = calculateScore();
-      const starText = "⭐".repeat(stars) + "☆".repeat(3 - stars);
-
-      ctx.fillStyle = "#4CAF50";
-      ctx.font = "bold 32px sans-serif";
-      ctx.fillText("🎉 목표 도달 성공!", canvas.width / 2, 180);
-
-      ctx.font = "40px sans-serif";
-      ctx.fillText(starText, canvas.width / 2, 245);
-
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "20px sans-serif";
-      ctx.fillText(`클리어 시간: ${elapsedTime.toFixed(2)}초`, canvas.width / 2, 300);
-      ctx.fillStyle = "#FFD700";
-      ctx.font = "bold 24px sans-serif";
-      ctx.fillText(`획득 포인트: ${totalPoints.toLocaleString()} P`, canvas.width / 2, 345);
-    } else {
-      ctx.fillStyle = "#FF4B4B";
-      ctx.font = "bold 34px sans-serif";
-      ctx.fillText("💥 게임 오버!", canvas.width / 2, 230);
-
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "18px sans-serif";
-      ctx.fillText("장애물에 부딪혔거나 블록을 놓쳤습니다.", canvas.width / 2, 275);
-      ctx.fillText(`도달 층수: ${blocks.length - 1}층`, canvas.width / 2, 310);
+  // 보드에 쌓인 블록 및 고정 장애물 그리기
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (board[r][c] === "OBS") {
+        drawBlock(c, r, null, true);
+      } else if (board[r][c] !== 0) {
+        drawBlock(c, r, board[r][c], false);
+      }
     }
   }
-}
 
-function gameLoop() {
-  update();
-  draw();
-  animationId = requestAnimationFrame(gameLoop);
-}
-
-// 조작 이벤트 (클릭 및 스페이스바)
-canvas.addEventListener("mousedown", placeBlock);
-window.addEventListener("keydown", (e) => {
-  if (e.code === "Space") {
-    e.preventDefault();
-    placeBlock();
+  // 현재 조작 중인 블록 그리기
+  if (gameState === "PLAYING" && currentPiece) {
+    const m = currentPiece.matrix;
+    for (let r = 0; r < m.length; r++) {
+      for (let c = 0; c < m[r].length; c++) {
+        if (m[r][c]) {
+          drawBlock(currentPiece.x + c, currentPiece.y + r, currentPiece.color);
+        }
+      }
+    }
   }
+
+  // 종료 화면 오버레이
+if (gameState !== "PLAYING") {
+ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.textAlign = "center";
+if (gameState === "CLEAR") {
+const { stars, totalPoints } = calculateScore();
+const starText = "⭐".repeat(stars) + "☆".repeat(3 - stars);
+ctx.fillStyle = "#4CAF50";
+ctx.font = "bold 28px sans-serif";
+ctx.fillText("🎉 목표 높이 도달!", canvas.width / 2, 190);
+ctx.font = "38px sans-serif";
+ctx.fillText(starText, canvas.width / 2, 250);
+ctx.fillStyle = "#FFFFFF";
+ctx.font = "18px sans-serif";
+ctx.fillText(클리어 시간: ${elapsedTime.toFixed(2)}초, canvas.width / 2, 305);
+ctx.fillStyle = "#FFD700";
+ctx.font = "bold 22px sans-serif";
+ctx.fillText(획득 포인트: ${totalPoints.toLocaleString()} P, canvas.width / 2, 345);
+} else {
+ctx.fillStyle = "#FF4B4B";
+ctx.font = "bold 30px sans-serif";
+ctx.fillText("💥 게임 오버!", canvas.width / 2, 240);
+ctx.fillStyle = "#FFFFFF";
+ctx.font = "16px sans-serif";
+ctx.fillText("블록이 천장에 닿았습니다.", canvas.width / 2, 285);
+}
+}
+}
+function update(time = 0) {
+if (gameState === "PLAYING") {
+const deltaTime = time - lastTime;
+lastTime = time;
+elapsedTime = (time - startTime) / 1000;
+timerEl.innerText = elapsedTime.toFixed(1);
+dropCounter += deltaTime;
+if (dropCounter > 600) { // 0.6초마다 한 칸씩 자동 하강
+playerDrop();
+}
+}
+draw();
+if (gameState === "PLAYING") {
+requestAnimationFrame(update);
+}
+}
+// 키보드 조작 이벤트
+window.addEventListener("keydown", event => {
+if (gameState !== "PLAYING") return;
+if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
+event.preventDefault();
+}
+if (event.code === "ArrowLeft") {
+currentPiece.x--;
+if (collide(board, currentPiece)) currentPiece.x++;
+} else if (event.code === "ArrowRight") {
+currentPiece.x++;
+if (collide(board, currentPiece)) currentPiece.x--;
+} else if (event.code === "ArrowDown") {
+playerDrop();
+} else if (event.code === "ArrowUp") {
+playerRotate();
+} else if (event.code === "Space") {
+hardDrop();
+}
 });
-
 initGame();
-</script>
-</body>
-</html>
-"""
 
-# 스트림릿 화면에 게임 렌더링
-components.html(game_html, height=660)
+
+
+"""
+components.html(game_html, height=690)
