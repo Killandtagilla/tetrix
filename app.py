@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="스피드 타워 쌓기", page_icon="🧱", layout="centered")
 
 st.title("🧱 초고속 타워 쌓기 (Speed Stacker)")
-st.markdown("블록을 빠르게 내려서 **빨간색 목표선**에 가장 짧은 시간 안에 도달하세요! *(줄이 완성되어도 사라지지 않습니다)*")
+st.markdown("움직이는 장애물과 강철 블록을 피해 **빨간색 목표선**에 가장 짧은 시간 안에 도달하세요!")
 
 game_html = """
 <!DOCTYPE html>
@@ -78,6 +78,7 @@ game_html = """
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+
 const COLS = 10;
 const ROWS = 20;
 const BLOCK_SIZE = 30;
@@ -91,7 +92,8 @@ const COLORS = [
   '#F538FF', // Z
   '#FF8E0D', // L
   '#FFE138', // O
-  '#3877FF'  // J
+  '#3877FF', // J
+  '#6e7681'  // 8: 고정 강철 장애물
 ];
 
 const SHAPES = [
@@ -102,7 +104,7 @@ const SHAPES = [
   [[4, 4, 0], [0, 4, 4], [0, 0, 0]], // Z
   [[0, 0, 5], [5, 5, 5], [0, 0, 0]], // L
   [[6, 6], [6, 6]], // O
-  [[7, 0, 0], [7, 7, 7], [0, 0, 0]]  // J
+  [[7, 0, 0], [7, 7, 7], [0, 0, 0]] // J
 ];
 
 let board = [];
@@ -113,9 +115,18 @@ let lastTime = 0;
 let startTime = 0;
 let elapsedTime = 0;
 let isWin = false;
-let bestTime = localStorage.getItem('stacker_best') || null;
+let bestTime = localStorage.getItem('stacker_best_obs') || null;
 
-// 결과 보상 변수
+// 움직이는 장애물 바 설정
+let movingObstacle = {
+  x: 0,
+  y: GOAL_ROW + 4, // 9번째 줄에서 좌우 이동
+  width: 3,        // 3칸 너비
+  dir: 1,
+  moveCounter: 0,
+  moveInterval: 280 // 0.28초마다 1칸 이동
+};
+
 let earnedStars = "";
 let earnedPoints = 0;
 
@@ -127,18 +138,50 @@ function createBoard() {
   return Array.from({length: ROWS}, () => Array(COLS).fill(0));
 }
 
+// 고정 강철 장애물 생성 (목표선과 움직이는 바를 피해 배치)
+function spawnStaticObstacles() {
+  let count = 0;
+  while (count < 6) {
+    const r = Math.floor(Math.random() * 10) + (GOAL_ROW + 2); // 7 ~ 16행 사이
+    const c = Math.floor(Math.random() * COLS);
+    // 움직이는 바의 행은 비워두고 배치
+    if (r !== movingObstacle.y && board[r][c] === 0) {
+      board[r][c] = 8;
+      count++;
+    }
+  }
+}
+
 function calculateReward(time) {
-  // 시간에 따른 별 개수 및 포인트 계산
-  if (time < 10.0) {
+  if (time < 12.0) {
     earnedStars = "⭐⭐⭐";
-    // 10초 미만일 때 남은 시간만큼 추가 보너스
-    earnedPoints = 1000 + Math.floor((10.0 - time) * 100);
-  } else if (time < 15.0) {
+    earnedPoints = 1000 + Math.floor((12.0 - time) * 100);
+  } else if (time < 18.0) {
     earnedStars = "⭐⭐☆";
-    earnedPoints = 600 + Math.floor((15.0 - time) * 50);
+    earnedPoints = 600 + Math.floor((18.0 - time) * 50);
   } else {
     earnedStars = "⭐☆☆";
-    earnedPoints = Math.max(100, 300 - Math.floor((time - 15.0) * 10));
+    earnedPoints = Math.max(100, 300 - Math.floor((time - 18.0) * 10));
+  }
+}
+
+function drawBlock(x, y, color, isObstacle = false) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+  ctx.strokeStyle = '#161b22';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+
+  // 장애물 전용 X자/빗금 디테일 추가
+  if (isObstacle) {
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x * BLOCK_SIZE + 5, y * BLOCK_SIZE + 5);
+    ctx.lineTo((x + 1) * BLOCK_SIZE - 5, (y + 1) * BLOCK_SIZE - 5);
+    ctx.moveTo((x + 1) * BLOCK_SIZE - 5, y * BLOCK_SIZE + 5);
+    ctx.lineTo(x * BLOCK_SIZE + 5, (y + 1) * BLOCK_SIZE - 5);
+    ctx.stroke();
   }
 }
 
@@ -146,14 +189,16 @@ function drawMatrix(matrix, offset) {
   matrix.forEach((row, y) => {
     row.forEach((value, x) => {
       if (value !== 0) {
-        ctx.fillStyle = COLORS[value];
-        ctx.fillRect((x + offset.x) * BLOCK_SIZE, (y + offset.y) * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-        ctx.strokeStyle = '#161b22';
-        ctx.lineWidth = 2;
-        ctx.strokeRect((x + offset.x) * BLOCK_SIZE, (y + offset.y) * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        drawBlock(x + offset.x, y + offset.y, COLORS[value], value === 8);
       }
     });
   });
+}
+
+function drawMovingObstacle() {
+  for (let i = 0; i < movingObstacle.width; i++) {
+    drawBlock(movingObstacle.x + i, movingObstacle.y, '#ff4b4b', true);
+  }
 }
 
 function drawGoalLine() {
@@ -187,47 +232,40 @@ function draw() {
   }
 
   drawMatrix(board, {x: 0, y: 0});
+  drawMovingObstacle();
+
   if (!isWin) {
     drawMatrix(player.matrix, player.pos);
   }
   drawGoalLine();
 
   if (isWin) {
-    // 어두운 결과창 배경
     ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 결과 박스 테두리
     ctx.strokeStyle = '#ffd700';
     ctx.lineWidth = 2;
     ctx.strokeRect(25, canvas.height / 2 - 115, canvas.width - 50, 230);
 
     ctx.textAlign = 'center';
-
-    // 1. 타이틀
     ctx.fillStyle = '#00ffcc';
     ctx.font = 'bold 24px Malgun Gothic';
     ctx.fillText('🎉 목표 도달 성공!', canvas.width / 2, canvas.height / 2 - 70);
 
-    // 2. 별 개수 표시
     ctx.font = '34px Malgun Gothic';
     ctx.fillText(earnedStars, canvas.width / 2, canvas.height / 2 - 20);
 
-    // 3. 클리어 시간
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 18px Malgun Gothic';
     ctx.fillText(`⏱️ 기록: ${elapsedTime.toFixed(2)}초`, canvas.width / 2, canvas.height / 2 + 25);
 
-    // 4. 획득 포인트
     ctx.fillStyle = '#ffd700';
     ctx.font = 'bold 22px Malgun Gothic';
     ctx.fillText(`💰 +${earnedPoints.toLocaleString()} P`, canvas.width / 2, canvas.height / 2 + 65);
 
-    // 안내 문구
     ctx.fillStyle = '#aaaaaa';
     ctx.font = '13px Malgun Gothic';
     ctx.fillText('R 키를 눌러 다시 도전하세요', canvas.width / 2, canvas.height / 2 + 98);
-
     ctx.textAlign = 'left';
   }
 }
@@ -236,8 +274,22 @@ function collide(board, player) {
   const [m, o] = [player.matrix, player.pos];
   for (let y = 0; y < m.length; ++y) {
     for (let x = 0; x < m[y].length; ++x) {
-      if (m[y][x] !== 0 && (board[y + o.y] && board[y + o.y][x + o.x]) !== 0) {
-        return true;
+      if (m[y][x] !== 0) {
+        const boardY = y + o.y;
+        const boardX = x + o.x;
+
+        // 보드 경계 및 고정 블록(강철 장애물 포함) 충돌 검사
+        if ((board[boardY] && board[boardY][boardX]) !== 0) {
+          return true;
+        }
+        // 움직이는 장애물 바 충돌 검사
+        if (
+          boardY === movingObstacle.y &&
+          boardX >= movingObstacle.x &&
+          boardX < movingObstacle.x + movingObstacle.width
+        ) {
+          return true;
+        }
       }
     }
   }
@@ -256,10 +308,12 @@ function merge(board, player) {
   });
 }
 
+// 빨간 목표선을 돌파(r < GOAL_ROW)해야 승리
 function checkWin() {
-  for (let r = 0; r <= GOAL_ROW; r++) {
+  for (let r = 0; r < GOAL_ROW; r++) {
     for (let c = 0; c < COLS; c++) {
-      if (board[r][c] !== 0) {
+      // 고정 장애물(8)이 아닌 플레이어가 쌓은 블록만 인정
+      if (board[r][c] !== 0 && board[r][c] !== 8) {
         return true;
       }
     }
@@ -272,7 +326,7 @@ function handleWin() {
   calculateReward(elapsedTime);
   if (!bestTime || elapsedTime < parseFloat(bestTime)) {
     bestTime = elapsedTime.toFixed(2);
-    localStorage.setItem('stacker_best', bestTime);
+    localStorage.setItem('stacker_best_obs', bestTime);
     document.getElementById('best').innerText = bestTime + '초';
   }
 }
@@ -342,56 +396,13 @@ function playerReset() {
   player.matrix = SHAPES[typeId].map(row => [...row]);
   player.pos.y = 0;
   player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
+
+  // 스폰 직후 블록이 막혀 더 이상 쌓을 수 없으면 보드 하단 일부 정리(소프트락 방지)
+  if (collide(board, player)) {
+    board.splice(ROWS - 3, 3);
+    board.unshift(...Array.from({length: 3}, () => Array(COLS).fill(0)));
+  }
 }
 
-function update(time = 0) {
-  if (!isWin) {
-    const deltaTime = time - lastTime;
-    lastTime = time;
-    dropCounter += deltaTime;
-
-    if (dropCounter > dropInterval) {
-      playerDrop();
-    }
-
-    elapsedTime = (performance.now() - startTime) / 1000;
-    document.getElementById('timer').innerText = elapsedTime.toFixed(2);
-  }
-  draw();
-  requestAnimationFrame(update);
-}
-
-function resetGame() {
-  board = createBoard();
-  isWin = false;
-  startTime = performance.now();
-  elapsedTime = 0;
-  dropCounter = 0;
-  playerReset();
-}
-
-document.addEventListener('keydown', event => {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
-    event.preventDefault();
-  }
-  if (event.code === 'KeyR') {
-    resetGame();
-    return;
-  }
-  if (isWin) return;
-
-  if (event.code === 'ArrowLeft') playerMove(-1);
-  else if (event.code === 'ArrowRight') playerMove(1);
-  else if (event.code === 'ArrowDown') playerDrop();
-  else if (event.code === 'ArrowUp') playerRotate(1);
-  else if (event.code === 'Space') playerHardDrop();
-});
-
-resetGame();
-update();
-</script>
-</body>
-</html>
-"""
-
-components.html(game_html, height=740)
+function updateMovingObstacle(deltaTime) {
+  movingObstacle.moveCounter += deltaTime;
