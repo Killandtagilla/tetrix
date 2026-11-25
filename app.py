@@ -17,7 +17,7 @@ canvas{border-radius:6px;background:#131520}
 </style></head><body>
 <div class="row" id="lvB"></div>
 <div class="row box">
-  <div style="font-size:13px;font-weight:bold"><div id="lvT"></div><div>⏱️<span id="tm">0.0</span>s | 📏<span id="ht">0</span>/16</div></div>
+  <div style="font-size:13px;font-weight:bold"><div id="lvT"></div><div>⏱️<span id="tm">0.0</span>s | 📏<span id="ht">0</span>/12</div></div>
   <button id="re" onclick="init()">🔄 재시작</button>
   <div style="text-align:center;font-size:10px;color:#aaa">NEXT<br><canvas id="nc" width="60" height="44"></canvas></div>
 </div>
@@ -29,13 +29,13 @@ canvas{border-radius:6px;background:#131520}
 <div style="font-size:11px;color:#999">⬅️➡️이동 | ⬆️회전 | ⬇️하강 | Space낙하 | R재시작</div>
 <script>
 const gc=document.getElementById("gc"),ctx=gc.getContext("2d"),nctx=document.getElementById("nc").getContext("2d");
-const C=10,R=20,S=26,OX=25,G=4;
+const C=10,R=20,S=26,OX=25,G=8;
 const LVS=[
-  {n:"Lv.1 입문",sp:650,t1:35,t2:55,o:"16,2 16,3 12,6 12,7 8,3 8,4"},
-  {n:"Lv.2 초급",sp:550,t1:32,t2:50,o:"17,1 17,2 14,6 14,7 14,8 10,2 10,3 7,5 7,6"},
-  {n:"Lv.3 중급",sp:470,t1:30,t2:48,o:"17,4 17,5 14,1 14,2 14,7 14,8 11,4 11,5 8,2 8,7 6,4 6,5"},
-  {n:"Lv.4 고급",sp:400,t1:28,t2:45,o:"17,2 17,3 17,7 15,5 13,1 13,2 13,8 11,4 11,5 9,2 9,7 7,4 7,5 7,6"},
-  {n:"Lv.5 극한",sp:330,t1:25,t2:40,o:"17,1 17,4 17,8 15,2 15,6 13,0 13,4 13,9 11,2 11,7 9,3 9,5 7,1 7,4 7,8"}
+  {n:"Lv.1 입문",sp:850,t1:45,t2:70,o:"17,1 14,8 11,1"},
+  {n:"Lv.2 초급",sp:750,t1:40,t2:65,o:"17,2 14,7 11,2 9,8"},
+  {n:"Lv.3 중급",sp:650,t1:38,t2:60,o:"17,1 17,8 14,4 11,1 9,7"},
+  {n:"Lv.4 고급",sp:570,t1:35,t2:55,o:"17,2 15,7 13,1 11,6 9,2 9,8"},
+  {n:"Lv.5 도전",sp:500,t1:32,t2:50,o:"18,1 16,5 16,8 13,2 11,7 9,1 9,4 9,8"}
 ];
 const SHP=[
   ["#00F0F0","0000","1111","0000","0000"],["#F0F000","11","11"],["#A000F0","010","111","000"],
@@ -72,7 +72,7 @@ function fix(){
   let hi=R,mx=0;
   cur.m.forEach((r,y)=>r.forEach((v,x)=>{if(v&&cur.y+y>=0){brd[cur.y+y][cur.x+x]=cur.c;hi=Math.min(hi,cur.y+y);}}));
   brd.forEach((r,y)=>r.forEach(v=>{if(v&&v!=="OBS")mx=Math.max(mx,R-y);}));
-  document.getElementById("ht").innerText=Math.min(16,mx);
+  document.getElementById("ht").innerText=Math.min(12,mx);
   hi<=G?st="CLR":spw();
 }
 function over(m){st="OVR";msg=m;}
@@ -95,15 +95,15 @@ function draw(){
   ctx.clearRect(0,0,310,520);ctx.strokeStyle="#1f2336";ctx.lineWidth=1;
   for(let i=0;i<=R;i++){ctx.beginPath();ctx.moveTo(OX,i*S);ctx.lineTo(OX+C*S,i*S);ctx.stroke();}
   for(let i=0;i<=C;i++){ctx.beginPath();ctx.moveTo(OX+i*S,0);ctx.lineTo(OX+i*S,R*S);ctx.stroke();}
-  ctx.strokeStyle="#FFD700";ctx.lineWidth=2;ctx.setLineDash([5,4]);
+  ctx.strokeStyle="#FFD700";ctx.lineWidth=2;ctx.setLineDash([6,4]);
   ctx.beginPath();ctx.moveTo(OX,G*S);ctx.lineTo(OX+C*S,G*S);ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle="#FFD700";ctx.font="bold 11px sans-serif";ctx.fillText("🏁 GOAL",OX+4,G*S-5);
+  ctx.fillStyle="#FFD700";ctx.font="bold 11px sans-serif";ctx.fillText("🏁 GOAL (12층)",OX+4,G*S-5);
   brd.forEach((r,y)=>r.forEach((v,x)=>v&&drawB(x,y,v,v==="OBS")));
   if(st==="PLAY")cur.m.forEach((r,y)=>r.forEach((v,x)=>v&&drawB(cur.x+x,cur.y+y,cur.c)));
   if(st!=="PLAY"){
     ctx.fillStyle="rgba(0,0,0,0.84)";ctx.fillRect(0,0,310,520);ctx.textAlign="center";
     if(st==="CLR"){
-      let d=LVS[lv],star=el<=d.t1?3:el<=d.t2?2:1,pts=(lv+1)*500+Math.max(0,((60-el)*40)|0);
+      let d=LVS[lv],star=el<=d.t1?3:el<=d.t2?2:1,pts=(lv+1)*500+Math.max(0,((80-el)*30)|0);
       ctx.fillStyle="#4CAF50";ctx.font="bold 24px sans-serif";ctx.fillText(`🎉 ${d.n} 클리어!`,155,170);
       ctx.font="36px sans-serif";ctx.fillText("⭐".repeat(star)+"☆".repeat(3-star),155,225);
       ctx.fillStyle="#fff";ctx.font="16px sans-serif";ctx.fillText(`시간: ${el.toFixed(2)}초 | ${pts.toLocaleString()} P`,155,275);
