@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="테트리스 클라이머", page_icon="🧱", layout="centered")
 
 st.title("🧱 테트리스 클라이머 (Tetris Climber)")
-st.markdown("게임 화면을 **한 번 클릭**한 뒤 방향키와 스페이스바로 조작하세요!")
+st.markdown("고정된 **붉은 장애물**을 피해 블록을 쌓아 **목표 라인(노란 점선)**까지 최대한 빠르게 올라가세요!")
 
 game_html = """
 <!DOCTYPE html>
@@ -116,7 +116,7 @@ game_html = """
 </div>
 
 <div id="controls-guide">
-  키보드: ⬅️➡️ 이동 | ⬆️ 회전 | ⬇️ 내리기 | <b>Space</b> 즉시 낙하
+  화면 클릭 후 키보드 조작: ⬅️➡️ 이동 | ⬆️ 회전 | ⬇️ 내리기 | <b>Space</b> 즉시 낙하
 </div>
 
 <div class="btn-group">
@@ -139,57 +139,20 @@ const BLOCK_SIZE = 28;
 const OFFSET_X = 20;
 const GOAL_ROW = 4;
 
-const SHAPES = [
-  {
-    color: "#00F0F0",
-    matrix: [,
- ,
- ,
-      [0, 0, 0, 0]
-    ]
-  },
-  {
-    color: "#F0F000",
-    matrix: [,
-      [1, 1]
-    ]
-  },
-  {
-    color: "#A000F0",
-    matrix: [,
- ,
-      [0, 0, 0]
-    ]
-  },
-  {
-    color: "#2979FF",
-    matrix: [,
- ,
-      [0, 0, 0]
-    ]
-  },
-  {
-    color: "#FF9100",
-    matrix: [,
- ,
-      [0, 0, 0]
-    ]
-  },
-  {
-    color: "#00E676",
-    matrix: [,
- ,
-      [0, 0, 0]
-    ]
-  },
-  {
-    color: "#FF1744",
-    matrix: [,
- ,
-      [0, 0, 0]
-    ]
-  }
+const SHAPE_DEFS = [
+  { color: "#00F0F0", rows: ["0000", "1111", "0000", "0000"] },
+  { color: "#F0F000", rows: ["11", "11"] },
+  { color: "#A000F0", rows: ["010", "111", "000"] },
+  { color: "#2979FF", rows: ["100", "111", "000"] },
+  { color: "#FF9100", rows: ["001", "111", "000"] },
+  { color: "#00E676", rows: ["011", "110", "000"] },
+  { color: "#FF1744", rows: ["110", "011", "000"] }
 ];
+
+const SHAPES = SHAPE_DEFS.map(def => ({
+  color: def.color,
+  matrix: def.rows.map(r => r.split("").map(Number))
+}));
 
 let board = [];
 let currentPiece = null;
@@ -433,12 +396,12 @@ function draw() {
   const goalY = GOAL_ROW * BLOCK_SIZE;
   ctx.strokeStyle = "#FFD700";
   ctx.lineWidth = 2;
-ctx.setLineDash([6, 4]);
-ctx.beginPath();
-ctx.moveTo(OFFSET_X, goalY);
-ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
-ctx.stroke();
-ctx.setLineDash([]);
+  ctx.setLineDash(new Array(6, 4));
+  ctx.beginPath();
+  ctx.moveTo(OFFSET_X, goalY);
+  ctx.lineTo(OFFSET_X + COLS * BLOCK_SIZE, goalY);
+  ctx.stroke();
+  ctx.setLineDash(new Array());
 ctx.fillStyle = "#FFD700";
 ctx.font = "bold 12px sans-serif";
 ctx.fillText("🏁 GOAL LINE (여기까지 쌓으세요!)", OFFSET_X + 5, goalY - 6);
