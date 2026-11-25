@@ -140,10 +140,10 @@ let movingBar = {
   interval: 260
 };
 
-// 2. 주기적 레이저 빔 (특정 열의 최상단 블록 파괴)
+// 2. 주기적 레이저 빔
 let laser = {
   col: -1,
-  state: 'idle', // 'idle' -> 'warning' -> 'fire'
+  state: 'idle',
   timer: 0
 };
 
@@ -158,7 +158,7 @@ function createBoard() {
   return Array.from({length: ROWS}, () => Array(COLS).fill(0));
 }
 
-// 강철 장애물 생성 (한 행에 최대 1개씩 배치하여 길 막힘 방지)
+// 강철 장애물 생성 (한 행에 최대 1개씩 배치)
 function spawnStaticObstacles() {
   const candidateRows =;
   candidateRows.forEach(r => {
@@ -210,12 +210,10 @@ function drawMatrix(matrix, offset) {
 }
 
 function drawObstacles() {
-  // 움직이는 바 그리기
   for (let i = 0; i < movingBar.width; i++) {
     drawCell(movingBar.x + i, movingBar.y, '#ff4b4b', true);
   }
 
-  // 레이저 경고 및 발사 효과 그리기
   if (laser.col !== -1) {
     const lx = laser.col * BLOCK_SIZE;
     if (laser.state === 'warning') {
@@ -252,7 +250,6 @@ function draw() {
   ctx.fillStyle = '#161b22';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // 그리드 배경선
   ctx.strokeStyle = '#21262d';
   ctx.lineWidth = 1;
   for (let r = 0; r < ROWS; r++) {
@@ -308,11 +305,9 @@ function collide(board, player) {
         const by = y + o.y;
         const bx = x + o.x;
 
-        // 벽, 바닥, 고정 블록 충돌
         if (bx < 0 || bx >= COLS || by >= ROWS || (board[by] && board[by][bx]) !== 0) {
           return true;
         }
-        // 움직이는 방해 바 충돌
         if (by === movingBar.y && bx >= movingBar.x && bx < movingBar.x + movingBar.width) {
           return true;
         }
@@ -412,108 +407,8 @@ function playerRotate(dir) {
     }
   }
 }
+
 function playerReset() {
-const typeId = Math.floor(Math.random() * 7) + 1;
-player.matrix = SHAPES[typeId].map(row => [...row]);
-player.pos.y = 0;
-player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
-// 입구가 막혀 움직일 수 없는 경우 맨 아래 2줄을 비워 진행 가능하게 유지
-if (collide(board, player)) {
-board.splice(ROWS - 2, 2);
-board.unshift(Array(COLS).fill(0), Array(COLS).fill(0));
-}
-}
-function updateObstacles(deltaTime) {
-// 1. 움직이는 방해 바 업데이트
-movingBar.timer += deltaTime;
-if (movingBar.timer >= movingBar.interval) {
-movingBar.timer = 0;
-const nextX = movingBar.x + movingBar.dir;
-// 벽에 닿거나 이동 경로에 블록이 있으면 방향 반전
-let blocked = nextX < 0 || nextX + movingBar.width > COLS;
-if (!blocked) {
-for (let i = 0; i < movingBar.width; i++) {
-if (board[movingBar.y][nextX + i] !== 0) {
-blocked = true;
-break;
-}
-}
-}
-if (blocked) {
-movingBar.dir *= -1;
-} else {
-movingBar.x = nextX;
-}
-}
-// 2. 레이저 빔 업데이트 (3.5초 대기 -> 1.2초 경고 -> 0.25초 발사)
-laser.timer += deltaTime;
-if (laser.state === 'idle' && laser.timer > 3500) {
-laser.col = Math.floor(Math.random() * COLS);
-laser.state = 'warning';
-laser.timer = 0;
-} else if (laser.state === 'warning' && laser.timer > 1200) {
-laser.state = 'fire';
-laser.timer = 0;
-// 해당 열의 가장 위에 있는 플레이어 블록 1칸 제거 (강철벽은 유지)
-for (let r = 0; r < ROWS; r++) {
-if (board[r][laser.col] !== 0 && board[r][laser.col] !== 8) {
-board[r][laser.col] = 0;
-break;
-}
-}
-} else if (laser.state === 'fire' && laser.timer > 250) {
-laser.state = 'idle';
-laser.col = -1;
-laser.timer = 0;
-}
-}
-function update(time = 0) {
-if (!isWin) {
-const deltaTime = time - lastTime;
-lastTime = time;
-dropCounter += deltaTime;
-if (dropCounter > dropInterval) {
-playerDrop();
-}
-updateObstacles(deltaTime);
-elapsedTime = (performance.now() - startTime) / 1000;
-document.getElementById('timer').innerText = elapsedTime.toFixed(2);
-}
-draw();
-requestAnimationFrame(update);
-}
-function resetGame() {
-board = createBoard();
-spawnStaticObstacles();
-movingBar.x = 0;
-movingBar.dir = 1;
-movingBar.timer = 0;
-laser = { col: -1, state: 'idle', timer: 0 };
-isWin = false;
-startTime = performance.now();
-elapsedTime = 0;
-dropCounter = 0;
-playerReset();
-}
-document.addEventListener('keydown', event => {
-if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
-event.preventDefault();
-}
-if (event.code === 'KeyR') {
-resetGame();
-return;
-}
-if (isWin) return;
-if (event.code === 'ArrowLeft') playerMove(-1);
-else if (event.code === 'ArrowRight') playerMove(1);
-else if (event.code === 'ArrowDown') playerDrop();
-else if (event.code === 'ArrowUp') playerRotate(1);
-else if (event.code === 'Space') playerHardDrop();
-});
-resetGame();
-update();
-
-
-
-"""
-components.html(game_html, height=760)
+  const typeId = Math.floor(Math.random() * 7) + 1;
+  player.matrix = SHAPES[typeId].map(row => [...row]);
+  player.pos.y = 0;
